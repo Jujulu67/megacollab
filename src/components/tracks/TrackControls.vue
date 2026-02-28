@@ -163,6 +163,192 @@
 							padding-bottom: 0.3rem;
 						"
 					></div>
+					<div class="sidechain-menu-section">
+						<button
+							class="default-button menu-btn sidechain-source-toggle"
+							:class="{ active: track.sidechain_is_source }"
+							@mousedown="toggleSidechainSource(id)"
+						>
+							<span
+								class="sidechain-source-pill"
+								:class="{ active: track.sidechain_is_source }"
+							>
+								SC
+							</span>
+							<p class="small">Sidechain Source</p>
+						</button>
+						<button
+							class="default-button menu-btn"
+							:class="{
+								'sidechain-receive-toggle active':
+									!!track.sidechain_source_track_id,
+							}"
+							@mousedown="openSidechainEditor(id)"
+						>
+							<span
+								class="sidechain-receive-pill"
+								:class="{ active: !!track.sidechain_source_track_id }"
+							>
+								RX
+							</span>
+							<p class="small">
+								{{
+									track.sidechain_source_track_id
+										? 'Receive Sidechain'
+										: 'Get Sidechain'
+								}}
+							</p>
+						</button>
+					</div>
+					<div
+						v-if="sidechainEditorTrackId === id"
+						class="sidechain-editor-panel"
+						@contextmenu.stop.prevent
+						@pointerdown.stop
+						@click.stop
+					>
+						<div class="sidechain-editor-header">
+							<p class="small bold">Receive Sidechain</p>
+							<button class="sidechain-close-btn" @mousedown="closeSidechainEditor">
+								×
+							</button>
+						</div>
+						<div
+							class="sidechain-graph-wrap"
+							@pointerdown="startSidechainShapeDrag($event, id)"
+						>
+							<svg
+								viewBox="0 0 100 100"
+								class="sidechain-graph"
+								preserveAspectRatio="none"
+							>
+								<defs>
+									<linearGradient id="scSourceFill" x1="0" y1="0" x2="0" y2="1">
+										<stop
+											offset="0%"
+											stop-color="#b86a1d"
+											stop-opacity="0.85"
+										/>
+										<stop
+											offset="100%"
+											stop-color="#b86a1d"
+											stop-opacity="0.1"
+										/>
+									</linearGradient>
+								</defs>
+								<rect x="0" y="0" width="100" height="100" fill="#0e0f11" />
+								<path
+									d="M 0 50 L 100 50"
+									stroke="rgba(255, 255, 255, 0.13)"
+									stroke-width="0.6"
+								/>
+								<path
+									d="M 50 0 L 50 100"
+									stroke="rgba(255, 255, 255, 0.12)"
+									stroke-width="0.5"
+									stroke-dasharray="2 2"
+								/>
+								<polygon
+									:points="getSidechainPreview(id).sourceAreaPoints"
+									fill="url(#scSourceFill)"
+								/>
+								<polyline
+									:points="getSidechainPreview(id).receiverPoints"
+									stroke="#f3cb2e"
+									stroke-width="1.2"
+									fill="none"
+								/>
+								<line
+									:x1="getSidechainPreview(id).handleX"
+									:y1="0"
+									:x2="getSidechainPreview(id).handleX"
+									y2="100"
+									stroke="rgba(243, 203, 46, 0.35)"
+									stroke-width="0.45"
+									stroke-dasharray="2 2"
+								/>
+								<line
+									x1="0"
+									:y1="getSidechainPreview(id).handleY"
+									x2="100"
+									:y2="getSidechainPreview(id).handleY"
+									stroke="rgba(243, 203, 46, 0.25)"
+									stroke-width="0.45"
+									stroke-dasharray="2 2"
+								/>
+							</svg>
+							<div
+								class="sidechain-handle-dot"
+								:style="{
+									left: `${getSidechainPreview(id).handleX}%`,
+									top: `${getSidechainPreview(id).handleY}%`,
+								}"
+							></div>
+						</div>
+						<p class="small dim sidechain-editor-hint">
+							Drag in graph:<br />
+							left/right = release<br />
+							up/down = curve
+						</p>
+						<div class="sidechain-editor-controls">
+							<label class="small dim">Sender</label>
+							<select
+								class="sidechain-sender-select"
+								:value="track.sidechain_source_track_id ?? ''"
+								@change="onSidechainSenderChange($event, id)"
+							>
+								<option value="">None</option>
+								<option
+									v-for="source in sidechainSourceOptions(id)"
+									:key="`${id}_sender_${source.id}`"
+									:value="source.id"
+								>
+									{{ source.label }}
+								</option>
+							</select>
+							<div class="sidechain-mix-row">
+								<label class="small dim">
+									Mix
+									{{ Math.round(clampSidechainMix(track.sidechain_mix) * 100) }}%
+								</label>
+								<input
+									class="sidechain-mix-slider"
+									type="range"
+									min="0"
+									max="100"
+									step="1"
+									:value="
+										Math.round(clampSidechainMix(track.sidechain_mix) * 100)
+									"
+									:disabled="!track.sidechain_source_track_id"
+									@pointerdown.stop="rememberSidechainMixStart(id)"
+									@input.stop="onSidechainMixInput($event, id)"
+									@change.stop="onSidechainMixCommit($event, id)"
+								/>
+							</div>
+							<p class="small dim sidechain-shape-values">
+								Curve {{ clampSidechainCurve(track.sidechain_curve).toFixed(2) }} •
+								Release
+								{{
+									Math.round(clampSidechainReleaseMs(track.sidechain_release_ms))
+								}}ms
+							</p>
+							<button
+								v-if="track.sidechain_source_track_id"
+								class="default-button menu-btn sidechain-disable-btn"
+								@mousedown="disableSidechainReceive(id)"
+							>
+								<p class="small">Disable Receive</p>
+							</button>
+						</div>
+					</div>
+					<div
+						style="
+							border-top: 1px solid var(--border-primary);
+							margin-top: 0.3rem;
+							padding-bottom: 0.3rem;
+						"
+					></div>
 					<button
 						class="default-button menu-btn"
 						@mousedown="insertTrack(index, 'above')"
@@ -216,15 +402,7 @@ import {
 	soloTrackIds,
 	hoveredTrackId,
 } from '@/state'
-import {
-	computed,
-	reactive,
-	nextTick,
-	useTemplateRef,
-	watch,
-	type CSSProperties,
-	shallowRef,
-} from 'vue'
+import { computed, reactive, nextTick, watch, type CSSProperties, shallowRef } from 'vue'
 import { getTrackVolume, isPlaying, setTrackGain, unregisterTrack } from '@/audioEngine'
 import { useRafFn, useEventListener } from '@vueuse/core'
 import { UseElementBounding, vOnClickOutside } from '@vueuse/components'
@@ -243,6 +421,76 @@ const wrapperStyles = computed((): CSSProperties => {
 const sortedTracks = computed(() => {
 	return [...tracks.entries()].sort((a, b) => a[1].order_index - b[1].order_index)
 })
+
+const trackLabelById = computed(() => {
+	const labels = new Map<string, string>()
+
+	sortedTracks.value.forEach(([id, track], index) => {
+		labels.set(id, track.title || `Track ${index + 1}`)
+	})
+
+	return labels
+})
+
+function getTrackLabel(trackId: string): string {
+	return trackLabelById.value.get(trackId) || 'Unknown Track'
+}
+
+const SIDECHAIN_MIN_CURVE = 0.35 as const
+const SIDECHAIN_MAX_CURVE = 3 as const
+const SIDECHAIN_MIN_RELEASE_MS = 40 as const
+const SIDECHAIN_MAX_RELEASE_MS = 420 as const
+const SIDECHAIN_PREVIEW_POINT_COUNT = 64 as const
+const SIDECHAIN_ATTACK_SECONDS = 0.007 as const
+
+function clampSidechainMix(value: number): number {
+	return Math.max(0, Math.min(1, value))
+}
+
+function clampSidechainCurve(value: number): number {
+	return Math.max(SIDECHAIN_MIN_CURVE, Math.min(SIDECHAIN_MAX_CURVE, value))
+}
+
+function clampSidechainReleaseMs(value: number): number {
+	return Math.max(SIDECHAIN_MIN_RELEASE_MS, Math.min(SIDECHAIN_MAX_RELEASE_MS, value))
+}
+
+function clamp01(value: number): number {
+	return Math.max(0, Math.min(1, value))
+}
+
+function releaseMsToNormX(value: number): number {
+	const clamped = clampSidechainReleaseMs(value)
+	return (
+		(clamped - SIDECHAIN_MIN_RELEASE_MS) / (SIDECHAIN_MAX_RELEASE_MS - SIDECHAIN_MIN_RELEASE_MS)
+	)
+}
+
+function normXToReleaseMs(value: number): number {
+	const clamped = clamp01(value)
+	return (
+		SIDECHAIN_MIN_RELEASE_MS + clamped * (SIDECHAIN_MAX_RELEASE_MS - SIDECHAIN_MIN_RELEASE_MS)
+	)
+}
+
+function curveToNormY(value: number): number {
+	const clamped = clampSidechainCurve(value)
+	return 1 - (clamped - SIDECHAIN_MIN_CURVE) / (SIDECHAIN_MAX_CURVE - SIDECHAIN_MIN_CURVE)
+}
+
+function normYToCurve(value: number): number {
+	const clamped = clamp01(value)
+	return SIDECHAIN_MIN_CURVE + (1 - clamped) * (SIDECHAIN_MAX_CURVE - SIDECHAIN_MIN_CURVE)
+}
+
+function sidechainSourceOptions(receiverTrackId: string): { id: string; label: string }[] {
+	return sortedTracks.value
+		.filter(([id, track]) => id !== receiverTrackId && track.sidechain_is_source)
+		.map(([id]) => ({
+			id,
+			label: getTrackLabel(id),
+		}))
+}
 
 function toggleSolo(trackId: string) {
 	if (soloTrackIds.has(trackId)) soloTrackIds.delete(trackId)
@@ -511,17 +759,369 @@ function toggleContextMenu(trackId: string) {
 	}
 }
 
+type SidechainTrackChanges = Pick<
+	ClientTrack,
+	| 'sidechain_is_source'
+	| 'sidechain_source_track_id'
+	| 'sidechain_mix'
+	| 'sidechain_curve'
+	| 'sidechain_release_ms'
+>
+
+type SidechainPreview = {
+	sourceAreaPoints: string
+	receiverPoints: string
+	handleX: number
+	handleY: number
+}
+
+const emptySidechainPreview: SidechainPreview = {
+	sourceAreaPoints: '0,90 100,90 100,90',
+	receiverPoints: '0,15 100,15',
+	handleX: 50,
+	handleY: 50,
+}
+
+const sidechainEditorTrackId = shallowRef<string | null>(null)
+
+function openSidechainEditor(trackId: string) {
+	sidechainEditorTrackId.value = sidechainEditorTrackId.value === trackId ? null : trackId
+}
+
+function closeSidechainEditor() {
+	sidechainEditorTrackId.value = null
+}
+
+watch(contextMenuTrackId, (trackId) => {
+	if (!trackId) {
+		sidechainEditorTrackId.value = null
+		return
+	}
+
+	if (sidechainEditorTrackId.value && sidechainEditorTrackId.value !== trackId) {
+		sidechainEditorTrackId.value = null
+	}
+})
+
+function buildSidechainPreview(track: ClientTrack): SidechainPreview {
+	const mix = clampSidechainMix(track.sidechain_mix)
+	const curve = clampSidechainCurve(track.sidechain_curve)
+	const releaseMs = clampSidechainReleaseMs(track.sidechain_release_ms)
+	const attackCoeff =
+		1 - Math.exp(-1 / (SIDECHAIN_ATTACK_SECONDS * SIDECHAIN_PREVIEW_POINT_COUNT))
+	const releaseCoeff = 1 - Math.exp(-1 / ((releaseMs / 1000) * SIDECHAIN_PREVIEW_POINT_COUNT))
+
+	const sourceValues: number[] = []
+	const receiverValues: number[] = []
+	let currentGain = 1
+
+	for (let i = 0; i < SIDECHAIN_PREVIEW_POINT_COUNT; i++) {
+		const t = i / (SIDECHAIN_PREVIEW_POINT_COUNT - 1)
+		const sourceEnvelope = Math.exp(-t * 8.5) * (1 - Math.exp(-t * 60))
+		sourceValues.push(sourceEnvelope)
+
+		const shapedSource = Math.pow(sourceEnvelope, curve)
+		const targetGain = 1 - shapedSource * mix
+		const coeff = targetGain < currentGain ? attackCoeff : releaseCoeff
+		currentGain += (targetGain - currentGain) * coeff
+		receiverValues.push(currentGain)
+	}
+
+	const sourceAreaPoints = [
+		'0,90',
+		...sourceValues.map((value, index) => {
+			const x = (index / (SIDECHAIN_PREVIEW_POINT_COUNT - 1)) * 100
+			const y = 90 - value * 52
+			return `${x.toFixed(2)},${y.toFixed(2)}`
+		}),
+		'100,90',
+	].join(' ')
+
+	const receiverPoints = receiverValues
+		.map((value, index) => {
+			const x = (index / (SIDECHAIN_PREVIEW_POINT_COUNT - 1)) * 100
+			const y = 92 - value * 78
+			return `${x.toFixed(2)},${y.toFixed(2)}`
+		})
+		.join(' ')
+
+	return {
+		sourceAreaPoints,
+		receiverPoints,
+		handleX: releaseMsToNormX(releaseMs) * 100,
+		handleY: curveToNormY(curve) * 100,
+	}
+}
+
+const sidechainPreviewByTrackId = computed(() => {
+	const previewMap = new Map<string, SidechainPreview>()
+
+	for (const [id, track] of sortedTracks.value) {
+		previewMap.set(id, buildSidechainPreview(track))
+	}
+
+	return previewMap
+})
+
+function getSidechainPreview(trackId: string): SidechainPreview {
+	return sidechainPreviewByTrackId.value.get(trackId) ?? emptySidechainPreview
+}
+
+async function persistTrackSidechainChanges(
+	trackId: string,
+	changes: Partial<SidechainTrackChanges>,
+	errorContext: string,
+	previousValues?: Partial<SidechainTrackChanges>,
+): Promise<boolean> {
+	const track = tracks.get(trackId)
+	if (!track) return false
+
+	const rollback: Partial<SidechainTrackChanges> = previousValues ?? {
+		sidechain_is_source: track.sidechain_is_source,
+		sidechain_source_track_id: track.sidechain_source_track_id,
+		sidechain_mix: track.sidechain_mix,
+		sidechain_curve: track.sidechain_curve,
+		sidechain_release_ms: track.sidechain_release_ms,
+	}
+
+	Object.assign(track, changes)
+
+	const res = await socket.emitWithAck('get:track:update', {
+		id: trackId,
+		changes,
+	})
+
+	if (!res.success) {
+		Object.assign(track, rollback)
+		userLog('SYSTEM', `Failed to ${errorContext}: ${res.error.message}`, {
+			textColor: 'red',
+		})
+		return false
+	}
+
+	return true
+}
+
+async function toggleSidechainSource(trackId: string) {
+	if (user.value?.banned_at) return
+
+	const track = tracks.get(trackId)
+	if (!track) return
+
+	const nextIsSource = !track.sidechain_is_source
+	const previousIsSource = track.sidechain_is_source
+	const updated = await persistTrackSidechainChanges(
+		trackId,
+		{
+			sidechain_is_source: nextIsSource,
+		},
+		'update sidechain source',
+	)
+	if (!updated) return
+
+	// If a source gets disabled, clear receivers that were pointing to it.
+	if (previousIsSource && !nextIsSource) {
+		const receivers = [...tracks.values()].filter(
+			(t) => t.sidechain_source_track_id === trackId,
+		)
+		for (const receiver of receivers) {
+			await persistTrackSidechainChanges(
+				receiver.id,
+				{ sidechain_source_track_id: null },
+				'disable sidechain receive',
+			)
+		}
+	}
+}
+
+async function setSidechainReceive(trackId: string, sourceTrackId: string) {
+	if (user.value?.banned_at) return
+	if (trackId === sourceTrackId) return
+
+	const sourceTrack = tracks.get(sourceTrackId)
+	if (!sourceTrack?.sidechain_is_source) {
+		userLog('SYSTEM', 'Selected sidechain source is not available.', { textColor: 'yellow' })
+		return
+	}
+
+	await persistTrackSidechainChanges(
+		trackId,
+		{
+			sidechain_source_track_id: sourceTrackId,
+		},
+		'set sidechain receive source',
+	)
+}
+
+async function onSidechainSenderChange(event: Event, trackId: string) {
+	const selectedSourceTrackId = (event.target as HTMLSelectElement).value || null
+
+	if (!selectedSourceTrackId) {
+		await disableSidechainReceive(trackId)
+		return
+	}
+
+	await setSidechainReceive(trackId, selectedSourceTrackId)
+}
+
+async function disableSidechainReceive(trackId: string) {
+	if (user.value?.banned_at) return
+	await persistTrackSidechainChanges(
+		trackId,
+		{
+			sidechain_source_track_id: null,
+		},
+		'disable sidechain receive',
+	)
+}
+
+const sidechainShapeDragStart = reactive(new Map<string, { curve: number; releaseMs: number }>())
+
+function updateSidechainShapeFromPointer(
+	trackId: string,
+	clientX: number,
+	clientY: number,
+	graphRect: DOMRect,
+) {
+	const track = tracks.get(trackId)
+	if (!track) return
+
+	const xNorm = clamp01((clientX - graphRect.left) / Math.max(1, graphRect.width))
+	const yNorm = clamp01((clientY - graphRect.top) / Math.max(1, graphRect.height))
+
+	track.sidechain_release_ms = normXToReleaseMs(xNorm)
+	track.sidechain_curve = normYToCurve(yNorm)
+}
+
+function startSidechainShapeDrag(event: PointerEvent, trackId: string) {
+	if (user.value?.banned_at) return
+	if (event.button !== 0) return
+
+	const graphEl = event.currentTarget as HTMLElement
+	const track = tracks.get(trackId)
+	if (!track) return
+
+	sidechainShapeDragStart.set(trackId, {
+		curve: clampSidechainCurve(track.sidechain_curve),
+		releaseMs: clampSidechainReleaseMs(track.sidechain_release_ms),
+	})
+
+	updateSidechainShapeFromPointer(
+		trackId,
+		event.clientX,
+		event.clientY,
+		graphEl.getBoundingClientRect(),
+	)
+
+	let completed = false
+
+	const onMove = (moveEvent: PointerEvent) => {
+		updateSidechainShapeFromPointer(
+			trackId,
+			moveEvent.clientX,
+			moveEvent.clientY,
+			graphEl.getBoundingClientRect(),
+		)
+	}
+
+	const onEnd = async () => {
+		if (completed) return
+		completed = true
+
+		stopMove()
+		stopUp()
+		stopCancel()
+
+		const currentTrack = tracks.get(trackId)
+		const initial = sidechainShapeDragStart.get(trackId)
+		if (!currentTrack || !initial) return
+
+		const nextCurve = clampSidechainCurve(currentTrack.sidechain_curve)
+		const nextReleaseMs = clampSidechainReleaseMs(currentTrack.sidechain_release_ms)
+		currentTrack.sidechain_curve = nextCurve
+		currentTrack.sidechain_release_ms = nextReleaseMs
+
+		await persistTrackSidechainChanges(
+			trackId,
+			{
+				sidechain_curve: nextCurve,
+				sidechain_release_ms: nextReleaseMs,
+			},
+			'update sidechain curve',
+			{
+				sidechain_curve: initial.curve,
+				sidechain_release_ms: initial.releaseMs,
+			},
+		)
+	}
+
+	const stopMove = useEventListener(window, 'pointermove', onMove)
+	const stopUp = useEventListener(window, 'pointerup', onEnd)
+	const stopCancel = useEventListener(window, 'pointercancel', onEnd)
+}
+
+const sidechainMixDragStart = reactive(new Map<string, number>())
+
+function rememberSidechainMixStart(trackId: string) {
+	const track = tracks.get(trackId)
+	if (!track) return
+	sidechainMixDragStart.set(trackId, clampSidechainMix(track.sidechain_mix))
+}
+
+function onSidechainMixInput(event: Event, trackId: string) {
+	const track = tracks.get(trackId)
+	if (!track) return
+
+	const raw = Number((event.target as HTMLInputElement).value)
+	track.sidechain_mix = clampSidechainMix(raw / 100)
+}
+
+async function onSidechainMixCommit(event: Event, trackId: string) {
+	if (user.value?.banned_at) return
+	const track = tracks.get(trackId)
+	if (!track) return
+
+	const raw = Number((event.target as HTMLInputElement).value)
+	const nextMix = clampSidechainMix(raw / 100)
+	const previousMix = sidechainMixDragStart.get(trackId) ?? track.sidechain_mix
+
+	track.sidechain_mix = nextMix
+
+	const updated = await persistTrackSidechainChanges(
+		trackId,
+		{
+			sidechain_mix: nextMix,
+		},
+		'update sidechain mix',
+		{
+			sidechain_mix: previousMix,
+		},
+	)
+
+	if (updated) {
+		sidechainMixDragStart.set(trackId, nextMix)
+	}
+}
+
 async function deleteTrack(trackId: string) {
 	if (user.value?.banned_at) return
 	contextMenuTrackId.value = null
+	if (sidechainEditorTrackId.value === trackId) sidechainEditorTrackId.value = null
 
 	const track = tracks.get(trackId)
 	if (!track) return
 
 	const clipsToDelete: Clip[] = []
+	const previousReceiverSources = new Map<string, string | null>()
 
 	for (const [_, clip] of clips.entries()) {
 		if (clip.track_id === trackId) clipsToDelete.push(clip)
+	}
+
+	for (const receiver of tracks.values()) {
+		if (receiver.sidechain_source_track_id !== trackId) continue
+		previousReceiverSources.set(receiver.id, receiver.sidechain_source_track_id)
+		receiver.sidechain_source_track_id = null
 	}
 
 	clipsToDelete.forEach((clip) => clips.delete(clip.id))
@@ -537,6 +1137,11 @@ async function deleteTrack(trackId: string) {
 		tracks.set(trackId, optimisticTrack)
 
 		clipsToDelete.forEach((clip) => clips.set(clip.id, clip))
+		for (const [receiverTrackId, previousSource] of previousReceiverSources) {
+			const receiverTrack = tracks.get(receiverTrackId)
+			if (!receiverTrack) continue
+			receiverTrack.sidechain_source_track_id = previousSource
+		}
 
 		userLog('SYSTEM', `Failed to delete track: ${res.error.message}`, {
 			textColor: 'red',
@@ -882,6 +1487,188 @@ async function resetVolume(trackId: string) {
 .menu-btn.delete:hover {
 	background-color: color-mix(in lch, #ff4444, black 20%);
 	color: white;
+}
+
+.menu-icon-spacer {
+	width: 13px;
+	height: 13px;
+	display: inline-block;
+	flex-shrink: 0;
+}
+
+.sidechain-menu-section {
+	display: grid;
+	gap: 0.35rem;
+	margin-bottom: 0.3rem;
+}
+
+.sidechain-source-toggle.active {
+	background-color: color-mix(in lch, #e8a620, transparent 78%);
+	box-shadow: 0 0 0.45rem 0.04rem color-mix(in lch, #e8a620, transparent 60%);
+}
+
+.sidechain-source-pill {
+	width: 1.45rem;
+	height: 1.45rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 999px;
+	font-size: 0.68rem;
+	font-weight: 700;
+	border: 1px solid var(--border-primary);
+	color: var(--text-color-secondary);
+	background-color: color-mix(in lch, var(--bg-color), black 30%);
+	transition: all 120ms ease;
+}
+
+.sidechain-source-pill.active {
+	color: #111;
+	border-color: #f3cb2e;
+	background: radial-gradient(circle at 35% 25%, #f7de66, #e8a620 70%);
+	box-shadow: 0 0 0.8rem 0.05rem color-mix(in lch, #f3cb2e, transparent 50%);
+}
+
+.sidechain-editor-panel {
+	position: absolute;
+	left: calc(100% + 0.5rem);
+	top: 0;
+	width: 18.8rem;
+	min-height: 21.2rem;
+	border-radius: 0.75rem;
+	padding: 0.7rem;
+	background: linear-gradient(
+		180deg,
+		color-mix(in lch, var(--bg-color), white 12%),
+		color-mix(in lch, var(--bg-color), black 6%)
+	);
+	border: 1px solid color-mix(in lch, var(--border-primary), white 15%);
+	box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.35);
+	display: grid;
+	gap: 0.6rem;
+	z-index: 120;
+}
+
+.sidechain-editor-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.sidechain-close-btn {
+	background: transparent;
+	border: none;
+	color: var(--text-color-secondary);
+	font-size: 1rem;
+	line-height: 1;
+	width: 1.3rem;
+	height: 1.3rem;
+	cursor: pointer;
+	border-radius: 0.3rem;
+}
+
+.sidechain-close-btn:hover {
+	background-color: color-mix(in lch, transparent, white 14%);
+	color: var(--text-color-primary);
+}
+
+.sidechain-graph-wrap {
+	position: relative;
+	border: 1px solid color-mix(in lch, var(--border-primary), white 12%);
+	border-radius: 0.45rem;
+	overflow: hidden;
+	cursor: move;
+}
+
+.sidechain-graph {
+	display: block;
+	width: 100%;
+	height: 9.6rem;
+}
+
+.sidechain-handle-dot {
+	position: absolute;
+	width: 0.78rem;
+	height: 0.78rem;
+	transform: translate(-50%, -50%);
+	border-radius: 999px;
+	background: #f3cb2e;
+	border: 1px solid #111;
+	box-shadow:
+		0 0 0.7rem 0.04rem color-mix(in lch, #f3cb2e, transparent 52%),
+		0 0 0 1px color-mix(in lch, #111, transparent 75%);
+	pointer-events: none;
+}
+
+.sidechain-editor-hint {
+	padding-left: 0.1rem;
+}
+
+.sidechain-editor-controls {
+	display: grid;
+	gap: 0.45rem;
+}
+
+.sidechain-sender-select {
+	width: 100%;
+	background-color: color-mix(in lch, var(--bg-color), black 16%);
+	border: 1px solid color-mix(in lch, var(--border-primary), white 8%);
+	color: var(--text-color-primary);
+	border-radius: 0.35rem;
+	padding: 0.48rem 0.58rem;
+	font-size: 0.9rem;
+	line-height: 1.25;
+	min-height: 2.1rem;
+}
+
+.sidechain-mix-row {
+	display: grid;
+	gap: 0.2rem;
+}
+
+.sidechain-mix-slider {
+	width: 100%;
+	accent-color: #f3cb2e;
+}
+
+.sidechain-shape-values {
+	padding: 0.05rem 0.1rem 0.1rem;
+}
+
+.sidechain-disable-btn {
+	padding-left: 0.55rem;
+	color: var(--text-color-secondary);
+}
+
+.sidechain-disable-btn:hover {
+	color: var(--text-color-primary);
+}
+
+.sidechain-receive-toggle.active {
+	background-color: color-mix(in lch, #e8a620, transparent 80%);
+	box-shadow: 0 0 0.45rem 0.02rem color-mix(in lch, #e8a620, transparent 62%);
+}
+
+.sidechain-receive-pill {
+	width: 1.45rem;
+	height: 1.45rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 999px;
+	font-size: 0.66rem;
+	font-weight: 700;
+	border: 1px solid var(--border-primary);
+	color: var(--text-color-secondary);
+	background-color: color-mix(in lch, var(--bg-color), black 28%);
+	transition: all 120ms ease;
+}
+
+.sidechain-receive-pill.active {
+	color: #111;
+	border-color: #f3cb2e;
+	background: radial-gradient(circle at 35% 25%, #f7de66, #e8a620 70%);
+	box-shadow: 0 0 0.8rem 0.05rem color-mix(in lch, #f3cb2e, transparent 50%);
 }
 
 .menu-trigger-btn {
