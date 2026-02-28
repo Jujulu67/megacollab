@@ -90,6 +90,10 @@
 			<UseElementBounding v-slot="{ top, height }" style="grid-area: vol">
 				<div
 					class="volumeSlider"
+					:class="{
+						'is-sidechain-source': track.sidechain_is_source,
+						'is-sidechain-receiver': !!track.sidechain_source_track_id,
+					}"
 					@pointerdown.stop="startVolumeDrag($event, id, top, height)"
 					@click.stop
 					@contextmenu.prevent.stop="resetVolume(id)"
@@ -1395,6 +1399,9 @@ async function resetVolume(trackId: string) {
 	position: relative;
 	height: 100%;
 	width: 1.1rem;
+	border: 1px solid transparent;
+	border-radius: 0.3rem;
+	overflow: hidden;
 
 	background-color: color-mix(in lab, var(--border-primary), black 65%);
 	display: flex;
@@ -1403,6 +1410,32 @@ async function resetVolume(trackId: string) {
 	touch-action: none;
 	/* prevent scroll while dragging */
 	cursor: ns-resize;
+	transition:
+		border-color 120ms ease,
+		box-shadow 120ms ease;
+}
+
+.volumeSlider.is-sidechain-source {
+	border-color: color-mix(in lch, #ff5757, black 10%);
+	box-shadow:
+		0 0 0 1px color-mix(in lch, #ff5757, transparent 72%),
+		0 0 0.55rem 0.03rem color-mix(in lch, #ff5757, transparent 78%);
+}
+
+.volumeSlider.is-sidechain-receiver {
+	border-color: color-mix(in lch, #f3cb2e, black 15%);
+	box-shadow:
+		0 0 0 1px color-mix(in lch, #f3cb2e, transparent 70%),
+		0 0 0.55rem 0.03rem color-mix(in lch, #f3cb2e, transparent 74%);
+}
+
+.volumeSlider.is-sidechain-source.is-sidechain-receiver {
+	border-color: color-mix(in lch, #f3cb2e 55%, #ff5757 45%);
+	box-shadow:
+		0 0 0 1px color-mix(in lch, #f3cb2e, transparent 75%),
+		0 0 0 2px color-mix(in lch, #ff5757, transparent 84%),
+		0 0 0.7rem 0.04rem color-mix(in lch, #f3cb2e, transparent 82%),
+		0 0 0.5rem 0.03rem color-mix(in lch, #ff5757, transparent 85%);
 }
 
 .volume-meter-fill {
