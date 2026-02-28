@@ -322,6 +322,11 @@ io.on('connection', async (socket) => {
 				color: null,
 				belongs_to_user_id: user.id, // for now
 				gain: DEFAULT_GAIN,
+				sidechain_is_source: false,
+				sidechain_source_track_id: null,
+				sidechain_mix: 1,
+				sidechain_curve: 1,
+				sidechain_release_ms: 120,
 			}
 
 			let track: ClientTrack

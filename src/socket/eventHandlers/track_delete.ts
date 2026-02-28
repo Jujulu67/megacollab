@@ -12,6 +12,12 @@ export default defineSocketHandler({
 			clips.delete(id)
 		})
 
+		for (const track of tracks.values()) {
+			if (track.sidechain_source_track_id === track_id) {
+				track.sidechain_source_track_id = null
+			}
+		}
+
 		unregisterTrack(track_id)
 		tracks.delete(track_id)
 	},

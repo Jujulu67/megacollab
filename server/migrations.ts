@@ -131,4 +131,27 @@ export const migrations: Migration[] = [
             `)
 		},
 	},
+	{
+		id: 7,
+		name: 'add_track_sidechain',
+		func: async (queryFn) => {
+			await queryFn(`
+				ALTER TABLE ${TRACKS_TABLE}
+				ADD COLUMN IF NOT EXISTS sidechain_is_source BOOLEAN NOT NULL DEFAULT FALSE,
+				ADD COLUMN IF NOT EXISTS sidechain_source_track_id TEXT,
+				ADD COLUMN IF NOT EXISTS sidechain_mix DOUBLE PRECISION NOT NULL DEFAULT 1
+			`)
+		},
+	},
+	{
+		id: 8,
+		name: 'add_track_sidechain_shape',
+		func: async (queryFn) => {
+			await queryFn(`
+				ALTER TABLE ${TRACKS_TABLE}
+				ADD COLUMN IF NOT EXISTS sidechain_curve DOUBLE PRECISION NOT NULL DEFAULT 1,
+				ADD COLUMN IF NOT EXISTS sidechain_release_ms DOUBLE PRECISION NOT NULL DEFAULT 120
+			`)
+		},
+	},
 ]

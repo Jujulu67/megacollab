@@ -64,6 +64,11 @@ export const ServerTrackSchema = z.object({
 	color: z.string().nullable(),
 	order_index: z.number(),
 	gain: z.number(),
+	sidechain_is_source: z.boolean(),
+	sidechain_source_track_id: z.string().nullable(),
+	sidechain_mix: z.number(),
+	sidechain_curve: z.number(),
+	sidechain_release_ms: z.number(),
 	created_at: z.iso.datetime({ offset: true }),
 })
 

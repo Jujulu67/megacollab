@@ -129,13 +129,51 @@ async function getAudioFile(id: string): Promise<ClientAudioFile | null> {
 }
 
 async function createTrack(track: Omit<ServerTrack, 'order_index'>): Promise<ClientTrack> {
-	const { id, creator_user_id, title, belongs_to_user_id, gain, color } = track
+	const {
+		id,
+		creator_user_id,
+		title,
+		belongs_to_user_id,
+		gain,
+		color,
+		sidechain_is_source,
+		sidechain_source_track_id,
+		sidechain_mix,
+		sidechain_curve,
+		sidechain_release_ms,
+	} = track
 
 	const rows = await queryFn<ClientTrack>(
 		`
 			WITH inserted AS (
-				INSERT INTO ${TRACKS_TABLE} (id, creator_user_id, title, belongs_to_user_id, gain, color, order_index) 
-				VALUES ($1, $2, $3, $4, $5, $6, (SELECT COALESCE(MAX(order_index), 0) + 1 FROM ${TRACKS_TABLE}))
+				INSERT INTO ${TRACKS_TABLE} (
+					id,
+					creator_user_id,
+					title,
+					belongs_to_user_id,
+					gain,
+					color,
+					sidechain_is_source,
+					sidechain_source_track_id,
+					sidechain_mix,
+					sidechain_curve,
+					sidechain_release_ms,
+					order_index
+				) 
+				VALUES (
+					$1,
+					$2,
+					$3,
+					$4,
+					$5,
+					$6,
+					$7,
+					$8,
+					$9,
+					$10,
+					$11,
+					(SELECT COALESCE(MAX(order_index), 0) + 1 FROM ${TRACKS_TABLE})
+				)
 				RETURNING *
 			)
 			SELECT 
@@ -145,7 +183,19 @@ async function createTrack(track: Omit<ServerTrack, 'order_index'>): Promise<Cli
 			LEFT JOIN ${USERS_TABLE} AS users
 				ON inserted.belongs_to_user_id = users.id
 		`,
-		[id, creator_user_id, title, belongs_to_user_id, gain, color],
+		[
+			id,
+			creator_user_id,
+			title,
+			belongs_to_user_id,
+			gain,
+			color,
+			sidechain_is_source,
+			sidechain_source_track_id,
+			sidechain_mix,
+			sidechain_curve,
+			sidechain_release_ms,
+		],
 	)
 
 	if (!rows.length) throw new Error('Failed to create track')
@@ -629,7 +679,12 @@ async function deleteTrack(
 ): Promise<{ deleted_clips: Clip['id'][]; deleted_track: ServerTrack }> {
 	const rows = await queryFn<ServerTrack & { deleted_clip_ids: ServerClip['id'][] | null }>(
 		`
-			WITH deleted_clips AS (
+			WITH cleared_sidechain AS (
+				UPDATE ${TRACKS_TABLE}
+				SET sidechain_source_track_id = NULL
+				WHERE sidechain_source_track_id = $1
+			),
+			deleted_clips AS (
 				DELETE FROM ${CLIPS_TABLE}
 				WHERE track_id = $1
 				RETURNING id

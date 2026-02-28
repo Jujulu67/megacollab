@@ -1,7 +1,7 @@
 import { computed, shallowRef, watch, watchEffect } from 'vue'
 import { beats_to_sec, quantize_beats, sec_to_beats } from '@/utils/mathUtils'
 import { useIntervalFn, useRafFn, watchThrottled, useTimeoutFn } from '@vueuse/core'
-import { clips, TOTAL_BEATS, audioBuffers, bpm, mutedTrackIds, soloTrackIds } from '@/state'
+import { clips, TOTAL_BEATS, audioBuffers, bpm, mutedTrackIds, soloTrackIds, tracks } from '@/state'
 import type { Clip, ServerTrack } from '~/schema'
 
 const inDev = import.meta.env.MODE === 'development'
@@ -20,11 +20,20 @@ export function setMasterGain(gain: number) {
 
 const trackGainNodes = new Map<string, GainNode>()
 const trackAnalysers = new Map<string, AnalyserNode>()
+const trackSidechainGainNodes = new Map<string, GainNode>()
+const trackSidechainInputAnalysers = new Map<string, AnalyserNode>()
+const sidechainCurrentMultipliers = new Map<string, number>()
+let lastSidechainUpdateTime = 0
 
 const SCHEDULER_LOOP_INRERVAL_MS = 100 as const
 const FFT_SIZE_VOLUMES = 256 as const
 const BACK_TRACKING_TIME_ON_PLAY = 0.05 as const
 const FADE_TIME_MS = 30 as const
+const SIDECHAIN_ATTACK_SECONDS = 0.007 as const
+const SIDECHAIN_MIN_RELEASE_MS = 40 as const
+const SIDECHAIN_MAX_RELEASE_MS = 420 as const
+const SIDECHAIN_MIN_CURVE = 0.35 as const
+const SIDECHAIN_MAX_CURVE = 3 as const
 
 const sortedClips = computed(() => {
 	return Array.from(clips.values()).sort((a, b) => a.start_beat - b.start_beat)
@@ -270,6 +279,15 @@ watch(isLooping, (looping, wasLooping) => {
 	}
 })
 
+watch(isPlaying, (playing) => {
+	if (!playing) {
+		for (const [trackId, node] of trackSidechainGainNodes) {
+			sidechainCurrentMultipliers.set(trackId, 1)
+			node.gain.setTargetAtTime(1, audioContext.currentTime, 0.01)
+		}
+	}
+})
+
 /** Stored "real" gain per track so we can restore after unmute/unsolo */
 const trackBaseGain = new Map<string, number>()
 
@@ -283,17 +301,26 @@ export function registerTrack(trackId: ServerTrack['id'], initialGain: number = 
 	if (trackGainNodes.has(trackId)) return
 
 	const gainNode = audioContext.createGain()
-	gainNode.connect(masterGain)
+	const sidechainGainNode = audioContext.createGain()
+	gainNode.connect(sidechainGainNode)
+	sidechainGainNode.connect(masterGain)
 
 	trackBaseGain.set(trackId, initialGain)
 	gainNode.gain.value = isTrackAudible(trackId) ? initialGain : 0
+	sidechainGainNode.gain.value = 1
 	trackGainNodes.set(trackId, gainNode)
+	trackSidechainGainNodes.set(trackId, sidechainGainNode)
 
-	// sidechained vol analyser
-	const analyser = audioContext.createAnalyser()
-	analyser.fftSize = FFT_SIZE_VOLUMES
-	gainNode.connect(analyser) // connect post-gain
-	trackAnalysers.set(trackId, analyser)
+	const meterAnalyser = audioContext.createAnalyser()
+	meterAnalyser.fftSize = FFT_SIZE_VOLUMES
+	sidechainGainNode.connect(meterAnalyser)
+	trackAnalysers.set(trackId, meterAnalyser)
+
+	const sidechainInputAnalyser = audioContext.createAnalyser()
+	sidechainInputAnalyser.fftSize = FFT_SIZE_VOLUMES
+	gainNode.connect(sidechainInputAnalyser)
+	trackSidechainInputAnalysers.set(trackId, sidechainInputAnalyser)
+	sidechainCurrentMultipliers.set(trackId, 1)
 }
 
 export function setTrackGain(trackId: ServerTrack['id'], gain: number) {
@@ -328,15 +355,31 @@ export function unregisterTrack(trackId: ServerTrack['id']) {
 
 	gainNode.disconnect()
 	trackGainNodes.delete(trackId)
+	trackBaseGain.delete(trackId)
 
 	const analyser = trackAnalysers.get(trackId)
 	if (analyser) {
 		analyser.disconnect()
 		trackAnalysers.delete(trackId)
 	}
+
+	const sidechainGainNode = trackSidechainGainNodes.get(trackId)
+	if (sidechainGainNode) {
+		sidechainGainNode.disconnect()
+		trackSidechainGainNodes.delete(trackId)
+	}
+
+	const sidechainInputAnalyser = trackSidechainInputAnalysers.get(trackId)
+	if (sidechainInputAnalyser) {
+		sidechainInputAnalyser.disconnect()
+		trackSidechainInputAnalysers.delete(trackId)
+	}
+
+	sidechainCurrentMultipliers.delete(trackId)
 }
 
 const floatBuffer = new Float32Array(FFT_SIZE_VOLUMES)
+const sidechainFloatBuffer = new Float32Array(FFT_SIZE_VOLUMES)
 
 export function getTrackVolume(trackId: ServerTrack['id']): number {
 	const analyser = trackAnalysers.get(trackId)
@@ -358,9 +401,75 @@ export function getTrackVolume(trackId: ServerTrack['id']): number {
 	return max
 }
 
+function getSidechainSourceAmplitude(trackId: string): number {
+	const analyser = trackSidechainInputAnalysers.get(trackId)
+	if (!analyser) return 0
+
+	analyser.getFloatTimeDomainData(sidechainFloatBuffer)
+
+	let peak = 0
+	for (let i = 0; i < sidechainFloatBuffer.length; i++) {
+		const abs = Math.abs(sidechainFloatBuffer[i] ?? 0)
+		if (abs > peak) peak = abs
+	}
+
+	return Math.min(1, peak)
+}
+
+function getSmoothingCoefficient(timeConstantSeconds: number, deltaSeconds: number): number {
+	const safeTimeConstant = Math.max(0.001, timeConstantSeconds)
+	return 1 - Math.exp(-deltaSeconds / safeTimeConstant)
+}
+
+function updateSidechainGains() {
+	const now = audioContext.currentTime
+	const deltaSeconds =
+		lastSidechainUpdateTime > 0 ? Math.max(1 / 240, now - lastSidechainUpdateTime) : 1 / 60
+	lastSidechainUpdateTime = now
+
+	const attackCoeff = getSmoothingCoefficient(SIDECHAIN_ATTACK_SECONDS, deltaSeconds)
+
+	for (const [trackId, sidechainNode] of trackSidechainGainNodes) {
+		const track = tracks.get(trackId)
+		if (!track) continue
+
+		const mix = Math.max(0, Math.min(1, track.sidechain_mix))
+		const curve = Math.max(
+			SIDECHAIN_MIN_CURVE,
+			Math.min(SIDECHAIN_MAX_CURVE, track.sidechain_curve),
+		)
+		const releaseMs = Math.max(
+			SIDECHAIN_MIN_RELEASE_MS,
+			Math.min(SIDECHAIN_MAX_RELEASE_MS, track.sidechain_release_ms),
+		)
+		const releaseCoeff = getSmoothingCoefficient(releaseMs / 1000, deltaSeconds)
+		const sourceTrackId = track.sidechain_source_track_id
+
+		let targetMultiplier = 1
+		if (
+			isPlaying.value &&
+			sourceTrackId &&
+			sourceTrackId !== trackId &&
+			tracks.get(sourceTrackId)?.sidechain_is_source
+		) {
+			const sourcePeak = getSidechainSourceAmplitude(sourceTrackId)
+			const shapedPeak = Math.pow(sourcePeak, curve)
+			targetMultiplier = 1 - shapedPeak * mix
+		}
+
+		const current = sidechainCurrentMultipliers.get(trackId) ?? 1
+		const smoothing = targetMultiplier < current ? attackCoeff : releaseCoeff
+		const next = current + (targetMultiplier - current) * smoothing
+
+		sidechainCurrentMultipliers.set(trackId, next)
+		sidechainNode.gain.setTargetAtTime(next, now, 0.01)
+	}
+}
+
 const uiRAFLoop = useRafFn(
 	() => {
 		if (!isPlaying.value) return
+		updateSidechainGains()
 		const elapsed = audioContext.currentTime - playbackStartTime.value
 		currentTime.value = startOffset.value + elapsed
 	},
@@ -595,6 +704,7 @@ export async function play() {
 	masterGain.gain.linearRampToValueAtTime(1, now + FADE_TIME_MS / 1000)
 
 	playbackStartTime.value = audioContext.currentTime + BACK_TRACKING_TIME_ON_PLAY
+	lastSidechainUpdateTime = audioContext.currentTime
 
 	let startPos = restingPositionSec.value
 
@@ -631,6 +741,7 @@ export function pause() {
 	isPlaying.value = false // for ui state
 
 	startPauseFadeOut()
+	lastSidechainUpdateTime = 0
 }
 
 export function seek(newTimeSeconds: number, opts?: { setAsRest?: boolean }) {
@@ -687,6 +798,7 @@ export function reset() {
 
 	schedulerLoop.pause()
 	uiRAFLoop.pause()
+	lastSidechainUpdateTime = 0
 }
 
 function binarySearchStartTimesStartIndex(sortedClips: Clip[], searchBeat: Clip['start_beat']) {

@@ -30,6 +30,109 @@ function takeSnapshot(): PlaylistSnapshot {
 
 const SAMPLE_RATE = 44100
 const NUM_CHANNELS = 2
+const SIDECHAIN_ATTACK_SECONDS = 0.007 as const
+const SIDECHAIN_AUTOMATION_STEP_SAMPLES = 128 as const
+const SIDECHAIN_MIN_RELEASE_MS = 40 as const
+const SIDECHAIN_MAX_RELEASE_MS = 420 as const
+const SIDECHAIN_MIN_CURVE = 0.35 as const
+const SIDECHAIN_MAX_CURVE = 3 as const
+
+function clamp01(value: number): number {
+	return Math.max(0, Math.min(1, value))
+}
+
+function buildSourceEnvelope(
+	snapshot: PlaylistSnapshot,
+	sourceTrackId: string,
+	totalSamples: number,
+): Float32Array {
+	const envelope = new Float32Array(totalSamples)
+	const sourceTrack = snapshot.tracks.get(sourceTrackId)
+	if (!sourceTrack) return envelope
+
+	const sourceTrackGain = Math.max(0, sourceTrack.gain)
+	const sourceClips = snapshot.clips.filter((clip) => clip.track_id === sourceTrackId)
+
+	for (const clip of sourceClips) {
+		const buffer = snapshot.buffers.get(clip.audio_file_id)
+		if (!buffer) continue
+
+		const left = buffer.getChannelData(0)
+		const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : left
+		const clipStartSample = Math.max(
+			0,
+			Math.floor(beats_to_sec_pure(clip.start_beat, snapshot.bpm) * SAMPLE_RATE),
+		)
+		const clipDurationSamples = Math.max(
+			0,
+			Math.floor(
+				beats_to_sec_pure(clip.end_beat - clip.start_beat, snapshot.bpm) * SAMPLE_RATE,
+			),
+		)
+		const sourceOffsetSamples = Math.max(0, Math.floor(clip.offset_seconds * buffer.sampleRate))
+		const sourceRateRatio = buffer.sampleRate / SAMPLE_RATE
+
+		if (clipDurationSamples <= 0) continue
+
+		for (let i = 0; i < clipDurationSamples; i++) {
+			const timelineSampleIndex = clipStartSample + i
+			if (timelineSampleIndex >= totalSamples) break
+
+			const sourceSampleIndex = sourceOffsetSamples + Math.floor(i * sourceRateRatio)
+			if (sourceSampleIndex >= left.length || sourceSampleIndex >= right.length) break
+
+			const samplePeak = Math.max(
+				Math.abs(left[sourceSampleIndex] ?? 0),
+				Math.abs(right[sourceSampleIndex] ?? 0),
+			)
+			const effectivePeak = clamp01(samplePeak * clip.gain * sourceTrackGain)
+
+			if (effectivePeak > envelope[timelineSampleIndex]!) {
+				envelope[timelineSampleIndex] = effectivePeak
+			}
+		}
+	}
+
+	return envelope
+}
+
+function buildSidechainCurve(
+	envelope: Float32Array,
+	mix: number,
+	curveShape: number,
+	releaseMs: number,
+): Float32Array {
+	const totalSamples = envelope.length
+	const pointCount = Math.max(2, Math.ceil(totalSamples / SIDECHAIN_AUTOMATION_STEP_SAMPLES))
+	const curve = new Float32Array(pointCount)
+	const clampedShape = Math.max(SIDECHAIN_MIN_CURVE, Math.min(SIDECHAIN_MAX_CURVE, curveShape))
+	const clampedReleaseMs = Math.max(
+		SIDECHAIN_MIN_RELEASE_MS,
+		Math.min(SIDECHAIN_MAX_RELEASE_MS, releaseMs),
+	)
+	const attackCoeff = 1 - Math.exp(-1 / (SIDECHAIN_ATTACK_SECONDS * SAMPLE_RATE))
+	const releaseCoeff = 1 - Math.exp(-1 / ((clampedReleaseMs / 1000) * SAMPLE_RATE))
+
+	let current = 1
+	let envelopeIndex = 0
+
+	for (let point = 0; point < pointCount; point++) {
+		const endSample = Math.min(totalSamples, (point + 1) * SIDECHAIN_AUTOMATION_STEP_SAMPLES)
+
+		while (envelopeIndex < endSample) {
+			const sourcePeak = clamp01(envelope[envelopeIndex] ?? 0)
+			const shapedPeak = Math.pow(sourcePeak, clampedShape)
+			const target = 1 - shapedPeak * mix
+			const coeff = target < current ? attackCoeff : releaseCoeff
+			current += (target - current) * coeff
+			envelopeIndex++
+		}
+
+		curve[point] = current
+	}
+
+	return curve
+}
 
 /**
  * Render the current playlist state offline using OfflineAudioContext.
@@ -58,14 +161,68 @@ export async function renderPlaylistOffline(): Promise<AudioBuffer> {
 		Math.ceil(durationSeconds * SAMPLE_RATE),
 		SAMPLE_RATE,
 	)
+	const totalSamples = Math.ceil(durationSeconds * SAMPLE_RATE)
 
-	// Build per-track gain nodes → destination
-	const trackGainNodes = new Map<string, GainNode>()
+	// Build per-track input gain and sidechain gain nodes.
+	const trackInputGainNodes = new Map<string, GainNode>()
+	const trackSidechainGainNodes = new Map<string, GainNode>()
 	for (const [trackId, track] of snapshot.tracks) {
-		const gainNode = offlineCtx.createGain()
-		gainNode.gain.value = track.gain
-		gainNode.connect(offlineCtx.destination)
-		trackGainNodes.set(trackId, gainNode)
+		const inputGainNode = offlineCtx.createGain()
+		const sidechainGainNode = offlineCtx.createGain()
+
+		inputGainNode.gain.value = track.gain
+		sidechainGainNode.gain.value = 1
+
+		inputGainNode.connect(sidechainGainNode)
+		sidechainGainNode.connect(offlineCtx.destination)
+
+		trackInputGainNodes.set(trackId, inputGainNode)
+		trackSidechainGainNodes.set(trackId, sidechainGainNode)
+	}
+
+	// Build source envelopes only for tracks that are actually used as sidechain sources.
+	const sourceTrackIds = new Set<string>()
+	for (const track of snapshot.tracks.values()) {
+		if (!track.sidechain_source_track_id) continue
+		if (track.sidechain_mix <= 0) continue
+
+		const sourceTrack = snapshot.tracks.get(track.sidechain_source_track_id)
+		if (!sourceTrack?.sidechain_is_source) continue
+
+		sourceTrackIds.add(track.sidechain_source_track_id)
+	}
+
+	const sidechainEnvelopes = new Map<string, Float32Array>()
+	for (const sourceTrackId of sourceTrackIds) {
+		sidechainEnvelopes.set(
+			sourceTrackId,
+			buildSourceEnvelope(snapshot, sourceTrackId, totalSamples),
+		)
+	}
+
+	// Apply ducking automation to receiver tracks.
+	for (const [trackId, track] of snapshot.tracks) {
+		const sourceTrackId = track.sidechain_source_track_id
+		if (!sourceTrackId) continue
+		if (sourceTrackId === trackId) continue
+
+		const mix = clamp01(track.sidechain_mix)
+		if (mix <= 0) continue
+
+		const sourceTrack = snapshot.tracks.get(sourceTrackId)
+		if (!sourceTrack?.sidechain_is_source) continue
+
+		const envelope = sidechainEnvelopes.get(sourceTrackId)
+		const sidechainGainNode = trackSidechainGainNodes.get(trackId)
+		if (!envelope || !sidechainGainNode) continue
+
+		const curve = buildSidechainCurve(
+			envelope,
+			mix,
+			track.sidechain_curve,
+			track.sidechain_release_ms,
+		)
+		sidechainGainNode.gain.setValueCurveAtTime(curve, 0, durationSeconds)
 	}
 
 	// Schedule every clip
@@ -73,8 +230,8 @@ export async function renderPlaylistOffline(): Promise<AudioBuffer> {
 		if (clip.muted) continue
 
 		const buffer = snapshot.buffers.get(clip.audio_file_id)
-		const trackGainNode = trackGainNodes.get(clip.track_id)
-		if (!buffer || !trackGainNode) continue
+		const trackInputGainNode = trackInputGainNodes.get(clip.track_id)
+		if (!buffer || !trackInputGainNode) continue
 
 		const source = offlineCtx.createBufferSource()
 		const clipGainNode = offlineCtx.createGain()
@@ -82,7 +239,7 @@ export async function renderPlaylistOffline(): Promise<AudioBuffer> {
 		clipGainNode.gain.value = clip.gain
 		source.buffer = buffer
 		source.connect(clipGainNode)
-		clipGainNode.connect(trackGainNode)
+		clipGainNode.connect(trackInputGainNode)
 
 		const startTimeSec = beats_to_sec_pure(clip.start_beat, snapshot.bpm)
 		const clipDurationSec = beats_to_sec_pure(clip.end_beat - clip.start_beat, snapshot.bpm)
