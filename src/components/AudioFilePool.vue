@@ -8,10 +8,19 @@
 			<div style="display: flex; gap: 1rem" class="dim small">
 				<p>Total Files: {{ audiofiles.size }}</p>
 				<p>Total Clips: {{ clips.size }}</p>
+				<button
+					class="no-select default-button preview-toggle"
+					:class="{ secondary: !audioPoolPreviewOnClick }"
+					@click="audioPoolPreviewOnClick = !audioPoolPreviewOnClick"
+				>
+					<Check v-if="audioPoolPreviewOnClick" :size="14" />
+					<X v-else :size="14" />
+					<span>Preview Sample</span>
+				</button>
 			</div>
 		</div>
 
-		<div class="clips-container">
+		<div class="clips-container" ref="clipsContainer">
 			<div v-for="audioFile in sortedAudioFiles" :key="audioFile.id">
 				<ClipInstance
 					:audiofile="audioFile"
@@ -60,13 +69,20 @@
 </template>
 
 <script setup lang="ts">
-import { audiofiles, clips, user, AUDIO_POOL_WIDTH, audioFilePoolHeightPx } from '@/state'
+import {
+	audiofiles,
+	clips,
+	user,
+	AUDIO_POOL_WIDTH,
+	audioFilePoolHeightPx,
+	audioPoolPreviewOnClick,
+} from '@/state'
 import UploadButton from '@/components/UploadButton.vue'
 import { computed, useTemplateRef, watchEffect } from 'vue'
 import type { AudioFile } from '@/types'
 import ClipInstance from '@/components/ClipInstance.vue'
 import { useDropZone, useElementSize } from '@vueuse/core'
-import { File } from 'lucide-vue-next'
+import { Check, File, X } from 'lucide-vue-next'
 import { audioMimeTypes } from '~/constants'
 import { optimisticAudioCreateUpload } from '@/utils/uploadAudio'
 import { useGlobalProgress } from '@/composables/useGlobalProgress'
@@ -137,6 +153,43 @@ const sortedAudioFiles = computed(() => {
 	const byDate = (a: AudioFile, b: AudioFile) =>
 		new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
 	return [...owned.sort(byDate), ...foreign.sort(byDate)]
+})
+
+// --- Middle Click Pan Logic (for macOS/Chrome) ---
+const clipsContainerEl = useTemplateRef('clipsContainer')
+
+import { useEventListener } from '@vueuse/core'
+
+useEventListener(clipsContainerEl, 'pointerdown', (e) => {
+	// Only handle middle click (button 1)
+	if (e.button !== 1) return
+
+	const container = clipsContainerEl.value
+	if (!container) return
+
+	// Prevent default browser behavior (like auto-scroll on Windows)
+	e.preventDefault()
+
+	const startX = e.clientX
+	const startScrollLeft = container.scrollLeft
+
+	const target = e.target as HTMLElement
+	target.setPointerCapture(e.pointerId)
+
+	const onMove = (moveEvent: PointerEvent) => {
+		if (!clipsContainerEl.value) return
+		const deltaX = moveEvent.clientX - startX
+		clipsContainerEl.value.scrollLeft = startScrollLeft - deltaX
+	}
+
+	const onUp = (upEvent: PointerEvent) => {
+		target.releasePointerCapture(upEvent.pointerId)
+		stopMove()
+		stopUp()
+	}
+
+	const stopMove = useEventListener(window, 'pointermove', onMove)
+	const stopUp = useEventListener(window, 'pointerup', onUp)
 })
 </script>
 
@@ -222,5 +275,15 @@ const sortedAudioFiles = computed(() => {
 .clips-container::-webkit-scrollbar {
 	display: none;
 	/* Chrome, Safari, Opera */
+}
+
+.preview-toggle {
+	height: 2.1rem;
+	padding: 0 0.8rem;
+	gap: 0.4rem;
+}
+
+.preview-toggle.secondary {
+	opacity: 0.75;
 }
 </style>

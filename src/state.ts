@@ -11,6 +11,43 @@ import { type DebugEntry } from '@/composables/useDebug'
 import { useDevicePixelRatio, useEventListener, useIntervalFn, useTimeoutFn } from '@vueuse/core'
 import type { AudioFile } from '@/types'
 
+// --- Clipboard & Tool types ---
+
+export type ToolMode = 'hand' | 'brush' | 'magic-brush' | 'slice' | 'mute'
+
+export type ClipboardEntry = {
+	relStartBeat: number
+	relEndBeat: number
+	trackOffset: number // index delta from lowest track in selection
+	audioFileId: string
+	offsetSeconds: number
+	gain: number
+	muted: boolean
+}
+
+export type BrushSourceClip = {
+	audioFileId: string
+	lengthBeats: number
+	offsetSeconds: number
+	gain: number
+}
+
+export type MultiDragState = {
+	startX: number
+	startY: number
+	deltaBeats: number
+	trackDelta: number
+	sourceClipId: string
+	clipSnapshots: Map<
+		string,
+		{
+			origStartBeat: number
+			origEndBeat: number
+			origTrackId: string
+		}
+	>
+}
+
 export const user = ref<User | null>(null)
 export const client = ref<Client | null>(null)
 export const showAdminPanel = shallowRef(false)
@@ -45,6 +82,35 @@ export const dragFromPoolState = shallowRef<{
 	clientY: number
 } | null>(null)
 
+// --- Tool & Clipboard state ---
+export const activeTool = shallowRef<ToolMode>('hand')
+export const brushAudioFileId = shallowRef<string | null>(null)
+export const brushSourceClip = shallowRef<BrushSourceClip | null>(null)
+export const audioPoolPreviewOnClick = shallowRef(false)
+export const cloneDragPreview = reactive<{
+	visible: boolean
+	trackId: string | null
+	audioFileId: string | null
+	startBeat: number
+	endBeat: number
+	offsetSeconds: number
+	gain: number
+	muted: boolean
+	topPx: number
+}>({
+	visible: false,
+	trackId: null,
+	audioFileId: null,
+	startBeat: 0,
+	endBeat: 0,
+	offsetSeconds: 0,
+	gain: 1,
+	muted: false,
+	topPx: 0,
+})
+export const clipboardClips = shallowRef<ClipboardEntry[] | null>(null)
+export const multiDragState = shallowRef<MultiDragState | null>(null)
+
 export const TOTAL_BEATS = 16 * 16
 export const pxPerBeat = shallowRef(40)
 export const maxPxPerBeat = 120 as const
@@ -77,6 +143,10 @@ useEventListener(window, 'pointerup', (event) => {
 	if (event.button === 2) {
 		rightMouseButtonPressedOnTimeline.value = false
 	}
+})
+
+useEventListener(window, 'blur', () => {
+	rightMouseButtonPressedOnTimeline.value = false
 })
 
 watchEffect(() => {
