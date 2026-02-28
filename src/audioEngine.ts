@@ -11,6 +11,12 @@ const masterGain = audioContext.createGain()
 masterGain.connect(audioContext.destination)
 let previewSource: AudioBufferSourceNode | null = null
 let previewGain: GainNode | null = null
+export const masterGainValue = shallowRef(1)
+
+export function setMasterGain(gain: number) {
+	masterGainValue.value = gain
+	masterGain.gain.setTargetAtTime(gain, audioContext.currentTime, 0.02)
+}
 
 const trackGainNodes = new Map<string, GainNode>()
 const trackAnalysers = new Map<string, AnalyserNode>()

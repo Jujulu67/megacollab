@@ -69,17 +69,43 @@
 				/>
 			</button>
 
-			<input
-				type="range"
-				:min="minPxPerBeat"
-				:max="maxPxPerBeat"
-				v-model.number="pxPerBeat"
-				style="width: 80px; margin-left: 1rem"
-			/>
+			<div
+				style="
+					display: flex;
+					align-items: center;
+					gap: 0.5rem;
+					margin-left: 1rem;
+					margin-right: 1rem;
+				"
+			>
+				<ZoomIn :size="16" style="color: var(--text-color-primary)" />
+				<input
+					type="range"
+					:min="minPxPerBeat"
+					:max="maxPxPerBeat"
+					v-model.number="pxPerBeat"
+					style="width: 80px"
+					title="Zoom"
+				/>
+			</div>
 
 			<Toolbar />
 
 			<div style="flex-grow: 1"></div>
+
+			<div style="display: flex; align-items: center; gap: 0.5rem; margin-right: 1rem">
+				<Volume2 :size="16" style="color: var(--text-color-primary)" />
+				<input
+					type="range"
+					min="0"
+					max="1.5"
+					step="0.01"
+					v-model.number="masterGainValue"
+					@input="handleMasterGainUpdate"
+					style="width: 80px"
+					title="Master Volume"
+				/>
+			</div>
 
 			<button
 				ref="userButton"
@@ -296,6 +322,8 @@ import {
 	reset,
 	toggleLoop,
 	isLooping,
+	masterGainValue,
+	setMasterGain,
 } from '@/audioEngine'
 import UserCursors from '@/components/UserCursors.vue'
 import TimelineHeader from '@/components/TimelineHeader.vue'
@@ -326,6 +354,8 @@ import {
 	Menu,
 	Repeat,
 	Download,
+	Volume2,
+	ZoomIn,
 } from 'lucide-vue-next'
 import { offset, useFloating } from '@floating-ui/vue'
 import { useRouter } from 'vue-router'
@@ -346,6 +376,10 @@ import { useGlobalProgress } from '@/composables/useGlobalProgress'
 const { userLog } = useConsole()
 
 const { averagePing } = usePing()
+
+function handleMasterGainUpdate() {
+	setMasterGain(masterGainValue.value)
+}
 
 const minutesNseconds = computed(() => {
 	const sec = currentPlayTimeSeconds.value
