@@ -51,9 +51,7 @@ function buildSourceEnvelope(
 	if (!sourceTrack) return envelope
 
 	const sourceTrackGain = Math.max(0, sourceTrack.gain)
-	const sourceClips = snapshot.clips.filter(
-		(clip) => clip.track_id === sourceTrackId && !clip.muted,
-	)
+	const sourceClips = snapshot.clips.filter((clip) => clip.track_id === sourceTrackId)
 
 	for (const clip of sourceClips) {
 		const buffer = snapshot.buffers.get(clip.audio_file_id)
