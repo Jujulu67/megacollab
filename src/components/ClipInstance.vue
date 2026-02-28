@@ -80,6 +80,7 @@ import {
 	pxTrackHeight,
 	audioPoolPreviewOnClick,
 	cloneDragPreview,
+	rightMouseButtonPressedOnTimeline,
 } from '@/state'
 import type { Clip } from '~/schema'
 import {
@@ -412,6 +413,7 @@ const displayState = computed(() => {
 				start_beat: start,
 				end_beat: snap.origEndBeat + multiDragState.value.deltaBeats,
 				offset_seconds: props.clip!.offset_seconds,
+				gain: props.clip!.gain,
 			}
 		}
 	}
@@ -1293,6 +1295,7 @@ onMounted(() => {
 				currentY: event.clientY,
 				previewTrackId: props.clip!.track_id,
 				verticalOffsetPx: 0,
+				cloneSourceClipId: null,
 			}
 
 			const el = event.currentTarget as HTMLElement
