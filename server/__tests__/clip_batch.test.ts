@@ -76,6 +76,7 @@ function makeClip(
 
 beforeAll(async () => {
 	Bun.env['ENV'] = 'development'
+	Bun.env['DEV_DATABASE_FOLDER'] = 'dev.database.test'
 
 	const databaseMod = await import('../database')
 	const historyMod = await import('../history')
