@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # npm : uniquement les mises à jour de sécurité (0 = pas de PR « de confort »).
+  - package-ecosystem: 'npm'
+    directories: ['/']
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '06:00'
+      timezone: 'Europe/Paris'
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'chore(deps)'
